@@ -1,0 +1,19 @@
+//function handler
+in string $national_code, string $license_id
+out Any
+
+
+//function get_user_info -> get user_info by national_code
+in string $national_code
+out Any
+
+
+//function get_liceses_info -> get licenses info by licenses id
+in string $license_id
+out Any
+
+
+//function run_query run a query with followed arguments
+in string $query, array $values
+out Any
+//
