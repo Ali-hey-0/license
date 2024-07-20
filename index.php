@@ -1,10 +1,12 @@
 <?php
 
 header('Content-Type: application/json');
+
 // Database connection setup
 $dsn = 'mysql:host=localhost;dbname=database';
 $username = 'root';
 $password = '';
+
 try {
     $pdo = new PDO($dsn, $username, $password);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -69,7 +71,7 @@ function create_license_request(string $national_id, string $license_id)
         ':approval_status' => 'pending',
         ':national_id' => $national_id,
         ':license' => $license_id,
-        ':ExpireTime' => date('Y-m-d H:i:s')
+        ':ExpireTime' => null // Set to NULL initially
     ];
 
     return run_query($query, $values);
@@ -80,21 +82,67 @@ function update_license_request_status(int $request_id, string $status)
 {
     global $pdo;
 
-    $values = [
-        ':status' => $status,
-        ':request_id' => $request_id
-    ];
+    // Check if the status is '0' or '1'
+    if ($status == '0') {
+        $query = 'UPDATE licenserequests SET approval_status = :status, ExpireTime = NULL WHERE id = :request_id';
+    } elseif ($status === '1') {
+        // Fetch license and validity duration
+        $stmt = $pdo->prepare("SELECT license FROM licenserequests WHERE id = :request_id");
+        $stmt->execute([':request_id' => $request_id]);
+        $license = $stmt->fetchColumn();
 
-    if ($status === 'Approved') {
-        $expireTime = (new DateTime())->modify('+3 months')->format('Y-m-d H:i:s');
+        if ($license === false) {
+            throw new Exception("License request not found for ID: $request_id");
+        }
+
+        $stmt = $pdo->prepare("SELECT validaty, validaty_unit FROM licenses WHERE license_id = :license_id");
+        $stmt->execute([':license_id' => $license]);
+        $licenseInfo = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($licenseInfo === false) {
+            throw new Exception("License not found for license ID: $license");
+        }
+
+        $validaty = $licenseInfo['validaty'];
+        $validaty_unit = $licenseInfo['validaty_unit'];
+
+        $expireTime = new DateTime();
+
+        // Use switch to adjust the expire time based on validaty_unit
+        switch ($validaty_unit) {
+            case 1:
+                // Validaty unit is in days
+                $expireTime->modify('+' . $validaty . ' days');
+                break;
+            case 2:
+                // Validaty unit is in months
+                $expireTime->modify('+' . $validaty . ' months');
+                break;
+            case 3:
+                // Validaty unit is in years
+                $expireTime->modify('+' . $validaty . ' years');
+                break;
+            default:
+                throw new Exception("Invalid validaty unit: $validaty_unit");
+        }
+
+        $expireTimeFormatted = $expireTime->format('Y-m-d H:i:s');
+
         $query = 'UPDATE licenserequests SET approval_status = :status, ExpireTime = :expireTime WHERE id = :request_id';
-        $values[':expireTime'] = $expireTime;
     } else {
-        $query = 'UPDATE licenserequests SET approval_status = :status WHERE id = :request_id';
+        throw new Exception("Invalid status value: $status");
     }
 
-    return run_query($query, $values);
+    // Prepare and execute the statement
+    $stmt = $pdo->prepare($query);
+    return $stmt->execute([
+        ':status' => $status,
+        ':request_id' => $request_id,
+        ':expireTime' => $expireTimeFormatted ?? null  // Ensure to pass NULL if the expireTime is not set
+    ]);
 }
+
+
 
 // Function handler to coordinate the creation of license requests
 function handler(string $national_id, string $license_id)
